@@ -1,0 +1,9 @@
+i
+cnn_text_classification/torchtext/test/snli_1*
+datasets/cifar10/
+*/*.pyc
+*/**/*.pyc
+*/**/**/*.pyc
+*/**/**/**/*.pyc
+*/**/**/**/**/*.pyc
+
