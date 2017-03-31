@@ -17,6 +17,12 @@ from torch.autograd import Variable
 import models.dcgan as dcgan
 import models.mlp as mlp
 
+import my_modules.utils as mutils
+
+from IPython.core.debugger import Tracer 
+debug_here = Tracer() 
+
+
 parser = argparse.ArgumentParser()
 # specify data and datapath 
 parser.add_argument('--dataset', required=True, help='cifar10 | lsun | imagenet | folder | lfw ')
@@ -33,7 +39,7 @@ parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ndf', type=int, default=64)
 # spcify optimization stuff 
 parser.add_argument('--adam', action='store_true', help='Whether to use adam (default is rmsprop)')
-parser.add_argument('--max_epochs', type=int, default=25, help='number of epochs to train for')
+parser.add_argument('--max_epochs', type=int, default=100, help='number of epochs to train for')
 parser.add_argument('--lrD', type=float, default=0.00005, help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lrG', type=float, default=0.00005, help='learning rate for Generator, default=0.00005')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
@@ -59,6 +65,7 @@ parser.add_argument('--experiment', default=None, help='Where to store samples a
 # resume training from a checkpoint
 parser.add_argument('--netG', default='', help="path to netG (to continue training)")
 parser.add_argument('--netD', default='', help="path to netD (to continue training)")
+parser.add_argument('--optim_state_from', default='', help="optim state to resume training")
 
 
 opt = parser.parse_args()
@@ -74,7 +81,9 @@ os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu_id
 
 ngpu = int(opt.ngpu)
 
-opt.manualSeed = random.randint(1, 10000) # fix seed
+# opt.manualSeed = random.randint(1, 10000) # fix seed
+opt.manualSeed = 123456
+
 if torch.cuda.is_available() and not opt.cuda:
     print("WARNING: You have a CUDA device, so you should probably run with --cuda")
 else:
@@ -124,14 +133,13 @@ elif opt.dataset == 'cifar10':
 
 
 assert dataset
+
+# set shuffle to be True, so that before every epoch of training, we 
+# shuffle the datasets
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
                                          shuffle=True, num_workers=int(opt.workers))
 
-
-
-
 nz = int(opt.nz)
-
 ngf = int(opt.ngf)
 ndf = int(opt.ndf)
 nc = int(opt.nc) # 3 by default, i.e., for RGB images
@@ -168,14 +176,17 @@ print(netD)
 
 # initialize from checkpoints 
 if opt.netD != '':
+    print('loading checkpoints from {0}'.format(opt.netD))
     netD.load_state_dict(torch.load(opt.netD))
 
 if opt.netG != '': # load checkpoint if needed
+    print('loading checkpoints from {0}'.format(opt.netG))
     netG.load_state_dict(torch.load(opt.netG))
 
 # input: b x c x h x w
 input = torch.FloatTensor(opt.batchSize, 3, opt.imageSize, opt.imageSize)
 noise = torch.FloatTensor(opt.batchSize, nz, 1, 1)
+
 # to have fixed_noise when looking output of generators 
 # to evaluate the training progress 
 # 1. For sample looking:
@@ -201,10 +212,26 @@ else:
     optimizerD = optim.RMSprop(netD.parameters(), lr = opt.lrD)
     optimizerG = optim.RMSprop(netG.parameters(), lr = opt.lrG)
 
+# loading optim state 
+
+epoch = 0
+if opt.optim_state_from != '':
+    print('loading optim_state_from {0}'.format(opt.optim_state_from))
+    optim_state = torch.load(opt.optim_state_from)
+    epoch = optim_state['epoch']
+    # configure optimzer 
+    optimizerG.load_state_dict(optim_state['optimizerG_state'])
+    optimizerD.load_state_dict(optim_state['optimizerD_state'])
+
+
+
 gen_iterations = 0
 
-for epoch in range(opt.max_epochs):
+# for epoch in range(opt.max_epochs):
 
+while epoch < opt.max_epochs:
+
+    epoch = epoch + 1 
     # Return an iterator object
     # object must be a collection object which supports the iteration protocol (the __iter__() method), 
     # or it must support the sequence protocol (the __getitem__() method with integer arguments 
@@ -212,7 +239,7 @@ for epoch in range(opt.max_epochs):
     data_iter = iter(dataloader)
 
     i = 0
-    while i < len(dataloader):
+    while i < len(dataloader): # running one epoch 
 
         ############################
         # (1) Update D network
@@ -235,7 +262,8 @@ for epoch in range(opt.max_epochs):
             for p in netD.parameters():
                 p.data.clamp_(opt.clamp_lower, opt.clamp_upper)
 
-            data = data_iter.next()
+            # load one batch of data 
+            data = data_iter.next() # i-th batch 
             i += 1
 
             # train with real
@@ -282,11 +310,31 @@ for epoch in range(opt.max_epochs):
         print('[%d/%d][%d/%d][%d] Loss_D: %f Loss_G: %f Loss_D_real: %f Loss_D_fake %f'
             % (epoch, opt.max_epochs, i, len(dataloader), gen_iterations,
             errD.data[0], errG.data[0], errD_real.data[0], errD_fake.data[0]))
+
         if gen_iterations % 500 == 0:
+            print('Saving current real images ... ')
             vutils.save_image(real_cpu, '{0}/real_samples.png'.format(opt.experiment))
             fake = netG(Variable(fixed_noise, volatile=True))
+            print('Now we begin to generate images ... ')
             vutils.save_image(fake.data, '{0}/fake_samples_{1}.png'.format(opt.experiment, gen_iterations))
 
+
+    ##############################################################################
+    ## save checkpoints every 1 epoch, including netG, netD, and optim_state for optimizer
+    ##############################################################################
+    # save checkpoint every 1 epoch 
     # do checkpointing
-    torch.save(netG.state_dict(), '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch))
-    torch.save(netD.state_dict(), '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch))
+    path_G = '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch)
+    path_D = '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch)
+    # save models to checkpoint
+    mutils.save_checkpoint(netG.state_dict(), path_G)
+    mutils.save_checkpoint(netD.state_dict(), path_D)
+    # save optim_state 
+    path_optim_state = '{0}/optim_sate_epoch_{1}.pth'.format(opt.experiment, epoch)
+    optim_state = {} 
+    optim_state['epoch'] = epoch 
+    optim_state['optimizerG_state'] = optimizerG.state_dict() 
+    optim_state['optimizerD_state'] = optimizerD.state_dict() 
+    mutils.save_checkpoint(optim_state, path_optim_state)
+
+
