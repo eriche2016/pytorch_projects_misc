@@ -39,7 +39,7 @@ parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ndf', type=int, default=64)
 # spcify optimization stuff 
 parser.add_argument('--adam', action='store_true', help='Whether to use adam (default is rmsprop)')
-parser.add_argument('--max_epochs', type=int, default=100, help='number of epochs to train for')
+parser.add_argument('--max_epochs', type=int, default=120, help='number of epochs to train for')
 parser.add_argument('--lrD', type=float, default=0.00005, help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lrG', type=float, default=0.00005, help='learning rate for Generator, default=0.00005')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
@@ -131,8 +131,17 @@ elif opt.dataset == 'cifar10':
                            ])
     )
 
-
+## transforms.ToTensor():
+# """Converts a PIL.Image or numpy.ndarray (H x W x C) in the range
+# [0, 255] to a torch.FloatTensor of shape (C x H x W) in the range [0.0, 1.0]. """
+##
 assert dataset
+
+# dataset.train_data: (50000, 32, 32, 3), ie, data format is HWC
+# dataset[1] will give image of size 3 x 64 x 64 and label is 9, for example (img = Image.fromarray(img) in 
+# pytorch/vision/dataset/cifar.py)
+
+
 
 # set shuffle to be True, so that before every epoch of training, we 
 # shuffle the datasets
@@ -184,6 +193,8 @@ if opt.netG != '': # load checkpoint if needed
     netG.load_state_dict(torch.load(opt.netG))
 
 # input: b x c x h x w
+# for cifar10, it is: bz x 3 x 64 x 64 (scaled version)
+# note that even though cifar10 image is of size 3 x 32 x 32
 input = torch.FloatTensor(opt.batchSize, 3, opt.imageSize, opt.imageSize)
 noise = torch.FloatTensor(opt.batchSize, nz, 1, 1)
 
@@ -225,7 +236,7 @@ if opt.optim_state_from != '':
 
 
 
-gen_iterations = 0
+gen_iterations = 499
 
 # for epoch in range(opt.max_epochs):
 
@@ -313,8 +324,14 @@ while epoch < opt.max_epochs:
 
         if gen_iterations % 500 == 0:
             print('Saving current real images ... ')
+            # convert back 
+            real_cpu = real_cpu.mul(0.5).add(0.5)
+            ##########
+            # debug_here() 
+            ##########
             vutils.save_image(real_cpu, '{0}/real_samples.png'.format(opt.experiment))
             fake = netG(Variable(fixed_noise, volatile=True))
+            fake.data = fake.data.mul(0.5).add(0.5)
             print('Now we begin to generate images ... ')
             vutils.save_image(fake.data, '{0}/fake_samples_{1}.png'.format(opt.experiment, gen_iterations))
 
@@ -324,13 +341,13 @@ while epoch < opt.max_epochs:
     ##############################################################################
     # save checkpoint every 1 epoch 
     # do checkpointing
-    path_G = '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch)
-    path_D = '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch)
+    path_G = '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch%5)
+    path_D = '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch%5)
     # save models to checkpoint
     mutils.save_checkpoint(netG.state_dict(), path_G)
     mutils.save_checkpoint(netD.state_dict(), path_D)
     # save optim_state 
-    path_optim_state = '{0}/optim_sate_epoch_{1}.pth'.format(opt.experiment, epoch)
+    path_optim_state = '{0}/optim_sate_epoch_{1}.pth'.format(opt.experiment, epoch%5)
     optim_state = {} 
     optim_state['epoch'] = epoch 
     optim_state['optimizerG_state'] = optimizerG.state_dict() 

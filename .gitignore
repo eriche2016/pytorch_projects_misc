@@ -1,4 +1,4 @@
-#WassersteinGAN/models_and_samples/*
+WassersteinGAN/models_and_samples/*.pth
 cnn_text_classification/torchtext/test/snli_1*
 datasets/cifar10/
 */*.pyc
