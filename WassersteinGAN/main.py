@@ -24,6 +24,7 @@ debug_here = Tracer()
 
 
 parser = argparse.ArgumentParser()
+
 # specify data and datapath 
 parser.add_argument('--dataset', required=True, help='cifar10 | lsun | imagenet | folder | lfw ')
 parser.add_argument('--dataroot', required=True, help='path to dataset')
@@ -39,7 +40,7 @@ parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ndf', type=int, default=64)
 # spcify optimization stuff 
 parser.add_argument('--adam', action='store_true', help='Whether to use adam (default is rmsprop)')
-parser.add_argument('--max_epochs', type=int, default=120, help='number of epochs to train for')
+parser.add_argument('--max_epochs', type=int, default=140, help='number of epochs to train for')
 parser.add_argument('--lrD', type=float, default=0.00005, help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lrG', type=float, default=0.00005, help='learning rate for Generator, default=0.00005')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
@@ -141,8 +142,6 @@ assert dataset
 # dataset[1] will give image of size 3 x 64 x 64 and label is 9, for example (img = Image.fromarray(img) in 
 # pytorch/vision/dataset/cifar.py)
 
-
-
 # set shuffle to be True, so that before every epoch of training, we 
 # shuffle the datasets
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
@@ -187,7 +186,6 @@ print(netD)
 if opt.netD != '':
     print('loading checkpoints from {0}'.format(opt.netD))
     netD.load_state_dict(torch.load(opt.netD))
-
 if opt.netG != '': # load checkpoint if needed
     print('loading checkpoints from {0}'.format(opt.netG))
     netG.load_state_dict(torch.load(opt.netG))
@@ -216,7 +214,7 @@ if opt.cuda:
     noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
 
 # setup optimizer
-if opt.adam:
+if opt.adam: # false 
     optimizerD = optim.Adam(netD.parameters(), lr=opt.lrD, betas=(opt.beta1, 0.999))
     optimizerG = optim.Adam(netG.parameters(), lr=opt.lrG, betas=(opt.beta1, 0.999))
 else:
@@ -234,14 +232,16 @@ if opt.optim_state_from != '':
     optimizerG.load_state_dict(optim_state['optimizerG_state'])
     optimizerD.load_state_dict(optim_state['optimizerD_state'])
 
-
-
-gen_iterations = 499
+############
+# debug_here() 
+############
+gen_iterations = 0
 
 # for epoch in range(opt.max_epochs):
 
-while epoch < opt.max_epochs:
 
+while epoch < opt.max_epochs:
+   
     epoch = epoch + 1 
     # Return an iterator object
     # object must be a collection object which supports the iteration protocol (the __iter__() method), 
@@ -284,6 +284,7 @@ while epoch < opt.max_epochs:
 
             if opt.cuda:
                 real_cpu = real_cpu.cuda()
+
             input.resize_as_(real_cpu).copy_(real_cpu)
             inputv = Variable(input)
 
@@ -292,12 +293,15 @@ while epoch < opt.max_epochs:
             errD_real.backward(one)
 
             # train with fake
+            # Gaussian noise 
             noise.resize_(opt.batchSize, nz, 1, 1).normal_(0, 1)
+            
             noisev = Variable(noise, volatile = True) # totally freeze netG
             fake = Variable(netG(noisev).data)
             inputv = fake
             errD_fake = netD(inputv)
             errD_fake.backward(mone)
+
             errD = errD_real - errD_fake
             optimizerD.step()
 
@@ -308,12 +312,15 @@ while epoch < opt.max_epochs:
             p.requires_grad = False # to avoid computation
 
         netG.zero_grad()
+
         # in case our last batch was the tail batch of the dataloader,
         # make sure we feed a full batch of noise
         noise.resize_(opt.batchSize, nz, 1, 1).normal_(0, 1)
         noisev = Variable(noise)
         fake = netG(noisev)
-        errG = netD(fake)
+        # error on fake image
+        # just a scalar 
+        errG = netD(fake) 
         errG.backward(one)
         optimizerG.step()
         gen_iterations += 1
@@ -329,6 +336,8 @@ while epoch < opt.max_epochs:
             ##########
             # debug_here() 
             ##########
+            # check https://github.com/pytorch/vision/blob/master/torchvision/utils.py#L81
+            # which will convert the tensor type to value of rang (0, 255)
             vutils.save_image(real_cpu, '{0}/real_samples.png'.format(opt.experiment))
             fake = netG(Variable(fixed_noise, volatile=True))
             fake.data = fake.data.mul(0.5).add(0.5)
@@ -347,9 +356,11 @@ while epoch < opt.max_epochs:
     mutils.save_checkpoint(netG.state_dict(), path_G)
     mutils.save_checkpoint(netD.state_dict(), path_D)
     # save optim_state 
-    path_optim_state = '{0}/optim_sate_epoch_{1}.pth'.format(opt.experiment, epoch%5)
+    path_optim_state = '{0}/optim_state_epoch_{1}.pth'.format(opt.experiment, epoch%5)
     optim_state = {} 
     optim_state['epoch'] = epoch 
+    # save ids instead of prameters variables 
+    # for state, it will save a dictionary of id to variables 
     optim_state['optimizerG_state'] = optimizerG.state_dict() 
     optim_state['optimizerD_state'] = optimizerD.state_dict() 
     mutils.save_checkpoint(optim_state, path_optim_state)

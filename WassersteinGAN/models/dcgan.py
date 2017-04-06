@@ -10,7 +10,7 @@ class DCGAN_D(nn.Module):
 
         main = nn.Sequential()
         # input is nc x isize x isize
-        # 3 -> 64 
+        # 3 -> 64
         main.add_module('initial.conv.{0}-{1}'.format(nc, ndf),
                         nn.Conv2d(nc, ndf, 4, 2, 1, bias=False)) # kernel=(4, 4), stride=(2, 2), pad=(1, 1)
         main.add_module('initial.relu.{0}'.format(ndf),
@@ -28,8 +28,8 @@ class DCGAN_D(nn.Module):
                             nn.LeakyReLU(0.2, inplace=True))
 
         while csize > 4:
-            in_feat = cndf # 64 
-            out_feat = cndf * 2 # 128 
+            in_feat = cndf # 64
+            out_feat = cndf * 2 # 128
             # conv(4, 4, 2, 2, 1, 1) -> bn2d -> LeakyReLU
             main.add_module('pyramid.{0}-{1}.conv'.format(in_feat, out_feat),
                             nn.Conv2d(in_feat, out_feat, 4, 2, 1, bias=False))
@@ -37,8 +37,8 @@ class DCGAN_D(nn.Module):
                             nn.BatchNorm2d(out_feat))
             main.add_module('pyramid.{0}.relu'.format(out_feat),
                             nn.LeakyReLU(0.2, inplace=True))
-            cndf = cndf * 2  # 64 * 2 = 128 
-            csize = csize / 2 # halve the size 
+            cndf = cndf * 2  # 64 * 2 = 128
+            csize = csize / 2 # halve the size
 
         # state size. Bz x K x 4 x 4 -> bz x 1 x 1 x 1
         main.add_module('final.{0}-{1}.conv'.format(cndf, 1),
@@ -47,13 +47,12 @@ class DCGAN_D(nn.Module):
 
 
     def forward(self, input):
-        gpu_ids = None
-        # only if self.ngpu > 1 will trigger the if statements 
+        # only if self.ngpu > 1 will trigger the if statements
         if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
-            gpu_ids = range(self.ngpu)
-
-        output = nn.parallel.data_parallel(self.main, input, gpu_ids)
-        # 1 x 1 x 1 x 1 
+            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        else:
+            output = self.main(input)
+        # 1 x 1 x 1 x 1
         output = output.mean(0)
         # return a scalar variables of size 1
         return output.view(1)
@@ -105,10 +104,12 @@ class DCGAN_G(nn.Module):
         self.main = main
 
     def forward(self, input):
-        gpu_ids = None
         if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
-            gpu_ids = range(self.ngpu)
-        return nn.parallel.data_parallel(self.main, input, gpu_ids)
+            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu)) 
+        else:
+            output = self.main(input) 
+
+        return output
 
 ###############################################################################
 class DCGAN_D_nobn(nn.Module):
@@ -150,10 +151,11 @@ class DCGAN_D_nobn(nn.Module):
 
 
     def forward(self, input):
-        gpu_ids = None
         if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
-            gpu_ids = range(self.ngpu)
-        output = nn.parallel.data_parallel(self.main, input, gpu_ids)
+            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        else: 
+            output = self.main(input)
+
         output = output.mean(0)
         return output.view(1)
 
@@ -197,7 +199,8 @@ class DCGAN_G_nobn(nn.Module):
         self.main = main
 
     def forward(self, input):
-        gpu_ids = None
         if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
-            gpu_ids = range(self.ngpu)
-        return nn.parallel.data_parallel(self.main, input, gpu_ids)
+            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        else:
+            output = self.main(input) 
+        return output 
